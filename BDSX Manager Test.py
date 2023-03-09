@@ -419,7 +419,7 @@ while True:
             player_list = []  # remove all players
             window['player_list'].update(values=player_list)
             player_count = 0
-            window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")
+            window['-ONLINE_PLAYERS-'].update(player_count)
             
     if event == '-1' or event == '-2' or event == '-6' or event == '-12':
         print("Test")
