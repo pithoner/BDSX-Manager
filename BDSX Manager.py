@@ -10,9 +10,9 @@ import configparser
 dir_path = os.path.dirname(__file__)
 
 # construct the path to the bat file in the same directory
-bat_file = os.path.join(dir_path, 'bdsx', 'bdsx.bat')
+bat_file = os.path.join(dir_path, 'bdsx.bat')
 
-bat_file = (r'C:\MCBDSX\bdsx\bdsx.bat')
+#bat_file = (r'C:\MCBDSX\bdsx\bdsx.bat')
 
 process = None
 
@@ -22,8 +22,7 @@ config_file = 'config.ini'
 if not os.path.exists(config_file):
     # create new config file with default values
     config = configparser.ConfigParser()
-    config['SERVER'] = {'RestartInterval': '6 hr'}
-    config['SERVER'] = {'Restartenabled': '0'}
+    config['SERVER'] = {'RestartInterval': '6', 'Restartenabled': '0'}
     with open(config_file, 'w') as f:
         config.write(f)
 
@@ -355,7 +354,7 @@ while True:
     event, values = window.read()
     print(event)
     
-    restart_enabled = config['SERVER'].getboolean('Restartenabled')
+    restart_enabled = int(config['SERVER'].getboolean('Restartenabled'))
     if restart_enabled is True and process is not None:
         time.sleep(restart_interval)
         print('Restart')
@@ -398,7 +397,7 @@ while True:
         subprocess.run(["start", "", file_path], shell=True)
 
     elif event == "Server.properties":
-        file_path = os.path.join(os.getcwd(), "Server.properties")
+        file_path = os.path.join(os.getcwd(), "bedrock_server", "Server.properties")
         subprocess.run(["start", "", file_path], shell=True)
 
     if event == 'BDSX Folder':
