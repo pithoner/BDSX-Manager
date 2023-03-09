@@ -12,18 +12,32 @@ dir_path = os.path.dirname(__file__)
 # construct the path to the bat file in the same directory
 bat_file = os.path.join(dir_path, 'bdsx', 'bdsx.bat')
 
-#bat_file = (r'C:\----\----\bdsx.bat')
+bat_file = (r'C:\MCBDSX\bdsx\bdsx.bat')
 
 process = None
 
-config = configparser.ConfigParser()
+config_file = 'config.ini'
 
-config.read('config.ini')
+# check if config file exists
+if not os.path.exists(config_file):
+    # create new config file with default values
+    config = configparser.ConfigParser()
+    config['SERVER'] = {'RestartInterval': '6 hr'}
+    config['SERVER'] = {'Restartenabled': '0'}
+    with open(config_file, 'w') as f:
+        config.write(f)
+
+# read config file
+config = configparser.ConfigParser()
+config.read(config_file)
 
 lock = threading.Lock()
 
 # regex pattern to match player join event
-JOIN_PATTERN = re.compile(r"Connection: ([^\s]+)> Ip=(\d+\.\d+\.\d+\.\d+)\|\d+, Xuid=(\d+),")
+#JOIN_PATTERN = re.compile(r"Connection: ([^\s]+)> Ip=(\d+\.\d+\.\d+\.\d+)\|\d+, Xuid=(\d+),")
+
+# regex pattern to match player join event
+JOIN_PATTERN = re.compile(r"Player connected: ([^\s]+), xuid: (\d+)")
 
 # regex pattern to match player leave event
 LEAVE_PATTERN = re.compile(r"Player disconnected: ([^\s]+), xuid: (\d+)")
@@ -31,7 +45,7 @@ LEAVE_PATTERN = re.compile(r"Player disconnected: ([^\s]+), xuid: (\d+)")
 player_list = []
 player_count = 0
 
-restart_interval = int(config['SERVER'].get('RestartInterval', '6 hr'))
+restart_interval = config['SERVER'].get('RestartInterval', '6 hr')
 
 def run_bat_file_restart():
     remaining_time = int(restart_interval) * 3600
@@ -341,7 +355,7 @@ while True:
     event, values = window.read()
     print(event)
     
-    restart_enabled = int(config['SERVER'].getboolean('Restartenabled'))
+    restart_enabled = config['SERVER'].getboolean('Restartenabled')
     if restart_enabled is True and process is not None:
         time.sleep(restart_interval)
         print('Restart')
@@ -371,6 +385,10 @@ while True:
 
     if event == 'Restart':
         restart_server()
+        player_list = []  # remove all players
+        window['player_list'].update(values=player_list)
+        player_count = 0
+        window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")
 
     if event == 'Kick':
         kick_player()
@@ -398,6 +416,10 @@ while True:
             sg.popup('Server is not running')
         else:
             stop_server()
+            player_list = []  # remove all players
+            window['player_list'].update(values=player_list)
+            player_count = 0
+            window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")
             
     if event == '-1' or event == '-2' or event == '-6' or event == '-12':
         print("Test")
