@@ -46,26 +46,34 @@ player_count = 0
 
 restart_interval = config['SERVER'].get('RestartInterval', '6 hr')
 
+stop_flag = False  # global flag variable to signal the loop to stop
+
 def run_bat_file_restart():
+    global stop_flag
     remaining_time = int(restart_interval) * 3600
     print(remaining_time)    
     global process
     global player_list
     global player_count
-    time.sleep(7)
-    while remaining_time > 0:
+    time.sleep(8)
+    stop_flag = False
+    while remaining_time > 0 and not stop_flag:
         time.sleep(1)
         remaining_time -= 1
         hours, rem = divmod(remaining_time, 3600)
         minutes, seconds = divmod(rem, 60)
         countdown_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         window['-COUNTDOWN-'].update(countdown_str)
-    
+    if stop_flag:  # check if flag is True
+        print("Restart loop stopped.")
+        return
+
     window['-COUNTDOWN-'].update("Restarting")
     print(remaining_time)
     print("Restarting")
     stop_server_restart()
     time.sleep(8)
+    
     with lock:
         if process is None:
             process = subprocess.Popen([bat_file], stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True)
@@ -112,7 +120,6 @@ def run_bat_file_restart():
                 window['-SERVER_STATE-'].update('Stopped')
             elif "Fail" in line or "Error" in line or "error" in line or "fail" in line or "exit" in line or "Exit" in line or "ERROR" in line:
                 window['-SERVER_STATE-'].update('Error')
-
 
 
 def run_bat_file():
@@ -219,6 +226,9 @@ def run_bat_file_delayed():
             elif "Fail" in line or "Error" in line or "error" in line or "fail" in line or "exit" in line or "Exit" in line or "ERROR" in line:
                 window['-SERVER_STATE-'].update('Error')
 
+def stop_restart_loop():
+    global stop_flag  # reference the global flag variable
+    stop_flag = True
 
 def start_server_delayed():
     window.Element('output').Update('')
@@ -241,6 +251,7 @@ def stop_server_restart():
     process.stdin.flush()
     start_server_restart()
 
+# unused
 def restart_server():
     global process
     if process is not None:
@@ -253,8 +264,6 @@ def start_server_restart():
     window.Element('output').Update('')
     thread = threading.Thread(target=run_bat_file_restart, daemon=True)
     thread.start()
-
-
 
 
 def run_command(values):
@@ -358,11 +367,7 @@ while True:
     if restart_enabled is True and process is not None:
         time.sleep(restart_interval)
         print('Restart')
-
-    if event == 'Run':
-        print("run", values['input'])
-        run_command(values)
-        
+  
     # if the 'Run .bat file' button is clicked
     if event == 'Start':
     # Check if the process is already running
@@ -370,24 +375,46 @@ while True:
             sg.popup('Server is already running')
         else:
             # run the .bat file with the command as an argument
+            stop_flag = False
             start_server()
             if restart_enabled == 1:
                 start_server_restart()
 
+    if event == 'Restart':
+        if process is None:
+            sg.popup('Server is not running')
+        else:
+            stop_server()
+            stop_restart_loop()        
+            start_server_delayed()
+            if restart_enabled == 1:
+                #stop_flag = False
+                start_server_restart()
+            player_list = []  # remove all players
+            window['player_list'].update(values=player_list)
+            player_count = 0
+            window['-ONLINE_PLAYERS-'].update(player_count)
 
+    if event == 'Stop':
+        if process is None:
+            sg.popup('Server is not running')
+        else:
+            stop_server()
+            stop_restart_loop()
+            player_list = []  # remove all players
+            window['player_list'].update(values=player_list)
+            player_count = 0
+            window['-ONLINE_PLAYERS-'].update(player_count)
+    
+    if event == 'Run':
+        print("run", values['input'])
+        run_command(values)
 
     if event == 'OP':
         op_player()
 
     if event == 'DEOP':
         deop_player()
-
-    if event == 'Restart':
-        restart_server()
-        player_list = []  # remove all players
-        window['player_list'].update(values=player_list)
-        player_count = 0
-        window['-ONLINE_PLAYERS-'].update(player_count)
 
     if event == 'Kick':
         kick_player()
@@ -405,20 +432,7 @@ while True:
         subprocess.Popen(f'explorer "{current_folder}"')  # Open the folder using the default file explorer
 
     if event == "-TEST-":
-        if restart_enabled == 1 and process is not None:
-            print(restart_enabled)
-            print(f"Restart enabled: {restart_enabled}")
-            print(f"Process: {process}")
-
-    if event == 'Stop':
-        if process is None:
-            sg.popup('Server is not running')
-        else:
-            stop_server()
-            player_list = []  # remove all players
-            window['player_list'].update(values=player_list)
-            player_count = 0
-            window['-ONLINE_PLAYERS-'].update(player_count)
+        stop_flag = False
             
     if event == '-1' or event == '-2' or event == '-6' or event == '-12':
         print("Test")
