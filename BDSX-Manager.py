@@ -10,8 +10,8 @@ import configparser
 dir_path = os.path.dirname(__file__)
 
 # construct the path to the bat file in the same directory
-bat_file = os.path.join(dir_path, 'bdsx.bat')
-
+#bat_file = os.path.join(dir_path, 'bdsx.bat')
+bat_file = os.path.join(os.getcwd(), "bdsx.bat")
 #bat_file = (r'C:\MCBDSX\bdsx\bdsx.bat')
 
 process = None
@@ -432,7 +432,9 @@ while True:
         subprocess.Popen(f'explorer "{current_folder}"')  # Open the folder using the default file explorer
 
     if event == "-TEST-":
-        stop_flag = False
+        print(bat_file)
+        #print(bat_file2)
+        #stop_flag = False
             
     if event == '-1' or event == '-2' or event == '-6' or event == '-12':
         print("Test")
