@@ -307,7 +307,7 @@ operations_column = [
      sg.Button('Restart', button_color="#DBA800", size = (10,0)), 
      sg.Button('Stop', button_color="red", size = (10,0))],
     [sg.Button('Index.ts', size = (16,0)), sg.Button('Server.properties', size = (16,0))], 
-    [sg.Button('BDSX Folder', size = (16,0)), sg.Button(' ', size = (16,0))], 
+    [sg.Button('BDSX Folder', size = (16,0)), sg.Button('Settings', size = (16,0))], 
     [sg.Text('—'*22, pad = (0,0), justification = "center")],
     
     [sg.Text("Auto Restart System:"), sg.Checkbox("Enabled", enable_events=True, key="-RESTART_ENABLED-")],
@@ -461,4 +461,3 @@ while True:
 
 # close the window
 window.close()
-
