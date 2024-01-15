@@ -12,4 +12,4 @@ Bdsx Github: https://github.com/bdsx/bdsx
 
 In the future I want to add other features such as auto backup and chat management feature. If you have any suggestions or bugs/problems please open an issue.
 
-![BDSX-Manager Screenshot](https://user-images.githubusercontent.com/109999434/225047926-1b424e36-caee-415e-9e7c-7866e9320a07.png)
+![image](https://github.com/pithoner/BDSX-Manager/assets/109999434/de660ed5-a285-48a3-9f60-2a26e9abc55e)
