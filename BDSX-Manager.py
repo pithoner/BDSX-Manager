@@ -9,7 +9,6 @@ import json
 import socket
 import sys
 
-
 def script_directory():
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
@@ -203,7 +202,6 @@ def run_server():
         else:
             break
 
-
 def start_server():
     window.Element('output').Update('')
     thread = threading.Thread(target=run_server, daemon=True)
@@ -217,12 +215,11 @@ def restart_server():
     stop_event.set()
     while not server_status == 'Stopped':
         #print('Waiting for server to stop')
-        time.sleep(5) #TODO pls fix this someone, the delay is 3 seconds to ensure it stops completely, else it throws an attribute error about process.
+        time.sleep(5) #TODO pls fix this someone, the delay is 5 seconds to ensure it stops completely, else it throws an attribute error about process not being stopped, even though bedrock_server is stopped.
                       #This only happens when running bdsx.bat, when running just the regular bedrock_server.exe it does not happened, so idk what causes the issue but if you know pls fix
 
     #print('Restart request sent')
     window.write_event_value('-SERVER_RESTARTABLE-', None)
-
 
 def stop_server():
     global stop_event
@@ -357,10 +354,11 @@ def update_info():
 
 sg.theme(app_theme)
 
-#DefaultNoMoreNagging
-#DarkGray13
-#DarkBlue3
-#PythonPlus
+
+#DefaultNoMoreNagging = Light
+#DarkGray13 = Dark
+#DarkBlue3 = Gray
+#PythonPlus = Blue
 
 themes = ['Light', 'Dark', 'Gray', 'Blue']
 
@@ -452,9 +450,6 @@ while True:
         else:
             restart_thread = threading.Thread(target=restart_server, daemon=True)
             restart_thread.start()
-
-            #if restart_enabled == 1:
-                #stop_flag = False
 
             player_list = []  # remove all players
             window['player_list'].update(values=player_list)
