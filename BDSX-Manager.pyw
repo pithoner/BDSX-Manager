@@ -5,346 +5,419 @@ import re
 import time
 import os
 import configparser
+import json
+import socket
+import sys
 
-# get the directory path of the current script
-dir_path = os.path.dirname(__file__)
+def script_directory():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    elif __file__:
+        return os.path.dirname(os.path.abspath(__file__))
+    else:
+        return os.getcwd()
 
-# construct the path to the bat file in the same directory
-#bat_file = os.path.join(dir_path, 'bdsx.bat')
-bat_file = os.path.join(os.getcwd(), "bdsx.bat")
-#bat_file = (r'C:\MCBDSX\bdsx\bdsx.bat')
+script_dir = script_directory()
+server_dir = os.path.join(script_dir, "bdsx.bat")
+bedrock_server_dir = os.path.join(script_dir, 'bedrock_server')
+permissions_dir = os.path.join(bedrock_server_dir, 'permissions.json')
 
+version = '1.1.2'
 process = None
-
 config_file = 'config.ini'
 
-# check if config file exists
 if not os.path.exists(config_file):
-    # create new config file with default values
     config = configparser.ConfigParser()
-    config['SERVER'] = {'RestartInterval': '6', 'Restartenabled': '0'}
+    config['SERVER'] = {'RestartInterval': '6',
+                        'Restartenabled': '0',
+                        'HideTelemetryMsg': '0',
+                        'Theme': 'DefaultNoMoreNagging'
+                        }
     with open(config_file, 'w') as f:
         config.write(f)
 
-# read config file
 config = configparser.ConfigParser()
 config.read(config_file)
 
+default_config = {'RestartInterval': '6',
+                  'Restartenabled': '0',
+                  'HideTelemetryMsg': '0',
+                  'Theme': 'DefaultNoMoreNagging'
+                  }
+
+for section in config.sections():
+    for key, value in default_config.items():
+        if key not in config[section]:
+            config[section][key] = value
+
+# Save the updated config
+with open(config_file, 'w') as f:
+    config.write(f)
+
+hide_telemetry_msg = config['SERVER'].getboolean('HideTelemetryMsg')
+restart_enabled = config['SERVER'].getboolean('Restartenabled')
+app_theme = config['SERVER']['Theme']
+
+if app_theme == 'DefaultNoMoreNagging':
+    app_theme_format = 'Light'
+elif app_theme == 'DarkGray13':
+    app_theme_format = 'Dark'
+elif app_theme == 'DarkBlue3':
+    app_theme_format = 'Gray'
+elif app_theme == 'PythonPlus':
+    app_theme_format = 'Blue'
+
 lock = threading.Lock()
 
-# regex pattern to match player join event
-#JOIN_PATTERN = re.compile(r"Connection: ([^\s]+)> Ip=(\d+\.\d+\.\d+\.\d+)\|\d+, Xuid=(\d+),")
-
-# regex pattern to match player join event
-JOIN_PATTERN = re.compile(r"Player connected: ([^\s]+), xuid: (\d+)")
-
-# regex pattern to match player leave event
-LEAVE_PATTERN = re.compile(r"Player disconnected: ([^\s]+), xuid: (\d+)")
+JOIN_PATTERN = re.compile(r"Player connected: (.*?), xuid: ?(\d*)")
+SPAWN_PATTERN = re.compile(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} INFO\] Player Spawned: (.*?) xuid: ?(\d*)")
+LEAVE_PATTERN = re.compile(r"Player disconnected: (.*?), xuid: ?(\d*)")
 
 player_list = []
 player_count = 0
 
-restart_interval = config['SERVER'].get('RestartInterval', '6 hr')
+restart_interval = config['SERVER']['RestartInterval']
+restart_seconds = 3600
 
-stop_flag = False  # global flag variable to signal the loop to stop
+stop_flag = False
 
-def run_bat_file_restart():
-    global stop_flag
-    remaining_time = int(restart_interval) * 3600
-    print(remaining_time)    
+server_status = "None"
+
+def run_server():
     global process
     global player_list
     global player_count
-    time.sleep(8)
-    stop_flag = False
-    while remaining_time > 0 and not stop_flag:
-        time.sleep(1)
-        remaining_time -= 1
-        hours, rem = divmod(remaining_time, 3600)
-        minutes, seconds = divmod(rem, 60)
-        countdown_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        window['-COUNTDOWN-'].update(countdown_str)
-    if stop_flag:  # check if flag is True
-        print("Restart loop stopped.")
-        return
+    global timer_thread
+    global server_status
 
-    window['-COUNTDOWN-'].update("Restarting")
-    print(remaining_time)
-    print("Restarting")
-    stop_server_restart()
-    time.sleep(8)
-    
+    restart_enabled = config['SERVER'].getboolean('Restartenabled')
+
     with lock:
         if process is None:
-            process = subprocess.Popen([bat_file], stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True)
+            process = subprocess.Popen([server_dir], stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True)
     output = ""
+
     while True:
-        line = process.stdout.readline()
-        
-        if line == '' and process.poll() is not None:
-            with lock:
-                process = None
-            break
-        if line:
-            line = re.sub(r'\033\[\d{1,2}m', '', line)
-            output += line
-            window['output'].update(output.strip())
+        if process is not None:
+            server_output = process.stdout.readline()
 
-            # search for player join event
-            match = JOIN_PATTERN.search(line)
-            if match:
-                player_name = match.group(1)
-                player_list.append(player_name)  # append player name only
-                window['player_list'].update(values=player_list)
-                player_count += 1  # increment player count
-                window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")  # update player count display
+            if server_output.strip() == '' and process.poll() is not None:
+                with lock:
+                    process = None
+                break
 
-            # search for player leave event
-            match = LEAVE_PATTERN.search(line)
-            if match:
-                player_name = match.group(1)
-                player_list = [p for p in player_list if p != player_name]  # remove player by name only
-                window['player_list'].update(values=player_list)
-                player_count -= 1  # decrement player count
-                window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")  # update player count display
+            if server_output.strip():
+                server_output = re.sub(r'\033\[\d{1,2}m', '', server_output)
+                server_output = server_output.strip()
 
-            # update server status
-            if '[BDSX] bedrockServer is launching...' in line:
+                if 'TELEMETRY MESSAGE' in server_output:
+                    hide_telemetry_msg = config['SERVER'].getboolean('HideTelemetryMsg')
+                    if hide_telemetry_msg:
+                        for _ in range(6):
+                            process.stdout.readline().strip()
+                        continue  # Skip the telemetry message
+
+                output += server_output + '\n'
+                window['output'].update(output)
+
+                match = JOIN_PATTERN.search(server_output)
+                if match:
+                    player_name = match.group(1)
+                    xuid = match.group(2)
+                    level = "Member"  #TODO make this be the default permission level for server.properties
+                    with open(permissions_dir) as f:
+                        permissions = json.load(f)
+                    for permission in permissions:
+                        if permission['xuid'] == xuid:
+                            level = permission['permission'].capitalize()
+                            break
+                    player_list.append([player_name, xuid, level])
+                    window['player_list'].update(values=player_list)
+                    player_count += 1
+                    window['-ONLINE_PLAYERS-'].update(player_count)
+
+                match = LEAVE_PATTERN.search(server_output)
+                if match:
+                    player_name = match.group(1)
+                    player_list = [p for p in player_list if p[0] != player_name]
+                    window['player_list'].update(values=player_list)
+                    player_count -= 1
+                    window['-ONLINE_PLAYERS-'].update(player_count)
+
+            if 'Level Name' in server_output:
+                match = re.search(r'Level Name: (.+)', server_output)
+                if match:
+                    level_name = match.group(1)
+                    window['-INFO_LEVELNAME-'].update(level_name)
+            if 'Game mode' in server_output:
+                match = re.search(r'Game mode: \d+ (\w+)', server_output)
+                if match:
+                    game_mode = match.group(1)
+                    window['-INFO_GAMEMODE-'].update(game_mode)
+            if 'Difficulty' in server_output:
+                match = re.search(r'Difficulty: \d+ (\w+)', server_output)
+                if match:
+                    difficulty = match.group(1).lower()
+                    window['-INFO_DIFFICULTY-'].update(difficulty.title())
+            if 'Version' in server_output:
+                match = re.search(r'Version: (.+)', server_output)
+                if match:
+                    version = match.group(1)
+                    window['-INFO_VERSION-'].update(version)
+            if 'port' in server_output:
+                match = re.search(r'IPv4 supported, port: (\d+): Used for gameplay', server_output)
+                if match:
+                    port_number = match.group(1)
+                    window['-INFO_PORT-'].update(port_number)
+                    ip_address = socket.gethostbyname(socket.gethostname())
+                    window['-INFO_ADDRESS-'].update(ip_address)
+
+            if 'Starting Server' in server_output:
                 window['-SERVER_STATE-'].update('Starting')
-            elif 'Server started.' in line:
+                server_status = 'Starting'
+            if 'Server started' in server_output:
                 window['-SERVER_STATE-'].update('Running')
-                remaining_time = restart_interval * 60
-            elif 'Server stop requested.' in line:
+                server_status = 'Running'
+                if restart_enabled:
+                    stop_event = threading.Event()
+                    auto_restart_thread = threading.Thread(target=auto_restart, args=(), daemon=True)
+                    auto_restart_thread.start()
+
+                timer_thread = threading.Thread(target=update_uptime, args=(), daemon=True)
+                timer_thread.start()
+
+            elif 'Server stop requested.' in server_output:
+                server_status = 'Stopping'
                 window['-SERVER_STATE-'].update('Stopping')
-            elif '[BDSX] bedrockServer closed' in line:
+            elif 'Quit correctly' in server_output:
+                window['-SERVER_STATE-'].update('Stopping')
+                server_status = 'Stopping'
+
+            elif '[BDSX] bedrockServer closed' in server_output:
                 window['-SERVER_STATE-'].update('Stopped')
-            elif "Fail" in line or "Error" in line or "error" in line or "fail" in line or "exit" in line or "Exit" in line or "ERROR" in line:
+                server_status = 'Stopped'
+
+            elif "Fail" in server_output or "Error" in server_output or "error" in server_output or "fail" in server_output or "exit" in server_output or "Exit" in server_output or "ERROR" in server_output:
                 window['-SERVER_STATE-'].update('Error')
-
-
-def run_bat_file():
-    global process
-    global player_list
-    global player_count
-    with lock:
-        if process is None:
-            process = subprocess.Popen([bat_file], stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True)
-    output = ""
-    while True:
-        line = process.stdout.readline()
-        
-        if line == '' and process.poll() is not None:
-            with lock:
-                process = None
+        else:
             break
-        if line:
-            line = re.sub(r'\033\[\d{1,2}m', '', line)
-            output += line
-            window['output'].update(output.strip())
-
-            # search for player join event
-            match = JOIN_PATTERN.search(line)
-            if match:
-                player_name = match.group(1)
-                player_list.append(player_name)  # append player name only
-                window['player_list'].update(values=player_list)
-                player_count += 1  # increment player count
-                window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")  # update player count display
-
-            # search for player leave event
-            match = LEAVE_PATTERN.search(line)
-            if match:
-                player_name = match.group(1)
-                player_list = [p for p in player_list if p != player_name]  # remove player by name only
-                window['player_list'].update(values=player_list)
-                player_count -= 1  # decrement player count
-                window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")  # update player count display
-
-            # update server status
-            if '[BDSX] bedrockServer is launching...' in line:
-                window['-SERVER_STATE-'].update('Starting')
-            elif 'Server started.' in line:
-                window['-SERVER_STATE-'].update('Running')
-                remaining_time = restart_interval * 60
-            elif 'Server stop requested.' in line:
-                window['-SERVER_STATE-'].update('Stopping')
-            elif '[BDSX] bedrockServer closed' in line:
-                window['-SERVER_STATE-'].update('Stopped')
-            elif "Fail" in line or "Error" in line or "error" in line or "fail" in line or "exit" in line or "Exit" in line or "ERROR" in line:
-                window['-SERVER_STATE-'].update('Error')
-
-
-def run_bat_file_delayed():
-    global process
-    global player_list
-    global player_count
-    time.sleep(5)
-    with lock:
-        if process is None:
-            process = subprocess.Popen([bat_file], stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True)
-    output = ""
-    while True:
-        line = process.stdout.readline()
-        
-        if line == '' and process.poll() is not None:
-            with lock:
-                process = None
-            break
-        if line:
-            line = re.sub(r'\033\[\d{1,2}m', '', line)
-            output += line
-            window['output'].update(output.strip())
-
-            # search for player join event
-            match = JOIN_PATTERN.search(line)
-            if match:
-                player_name = match.group(1)
-                player_list.append(player_name)  # append player name only
-                window['player_list'].update(values=player_list)
-                player_count += 1  # increment player count
-                window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")  # update player count display
-
-            # search for player leave event
-            match = LEAVE_PATTERN.search(line)
-            if match:
-                player_name = match.group(1)
-                player_list = [p for p in player_list if p != player_name]  # remove player by name only
-                window['player_list'].update(values=player_list)
-                player_count -= 1  # decrement player count
-                window['-ONLINE_PLAYERS-'].update(f"Players: {player_count}")  # update player count display
-
-            # update server status
-            if '[BDSX] bedrockServer is launching...' in line:
-                window['-SERVER_STATE-'].update('Starting')
-            elif 'Server started.' in line:
-                window['-SERVER_STATE-'].update('Running')
-                remaining_time = restart_interval * 60
-            elif 'Server stop requested.' in line:
-                window['-SERVER_STATE-'].update('Stopping')
-            elif '[BDSX] bedrockServer closed' in line:
-                window['-SERVER_STATE-'].update('Stopped')
-            elif "Fail" in line or "Error" in line or "error" in line or "fail" in line or "exit" in line or "Exit" in line or "ERROR" in line:
-                window['-SERVER_STATE-'].update('Error')
-
-def stop_restart_loop():
-    global stop_flag  # reference the global flag variable
-    stop_flag = True
-
-def start_server_delayed():
-    window.Element('output').Update('')
-    thread = threading.Thread(target=run_bat_file_delayed, daemon=True)
-    thread.start()
 
 def start_server():
     window.Element('output').Update('')
-    thread = threading.Thread(target=run_bat_file, daemon=True)
+    thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
+
+stop_restart_thread = threading.Event()
+
+def restart_server():
+    global stop_event
+    stop_server()
+    stop_event.set()
+    while not server_status == 'Stopped':
+        #print('Waiting for server to stop')
+        time.sleep(5) #TODO pls fix this someone, the delay is 5 seconds to ensure it stops completely, else it throws an attribute error about process not being stopped, even though bedrock_server is stopped.
+                      #This only happens when running bdsx.bat, when running just the regular bedrock_server.exe it does not happened, so idk what causes the issue but if you know pls fix
+
+    #print('Restart request sent')
+    window.write_event_value('-SERVER_RESTARTABLE-', None)
 
 def stop_server():
-    command = ("stop")
+    global stop_event
+    stop_event.set()
+    command = "stop"
     process.stdin.write(command + "\n")
     process.stdin.flush()
+    #print('stopping server')
 
-def stop_server_restart():
-    command = ("stop")
+def stop_server_force(type):
+    global stop_event
+    stop_event.set()
+    command = "stop"
     process.stdin.write(command + "\n")
     process.stdin.flush()
-    start_server_restart()
+    while not server_status == 'Stopped':
+        time.sleep(1)
+    if type == 'Stop':
+        window.write_event_value('-SERVER_STOPPED-', None)
+    elif type == 'Restart':
+        window.write_event_value('-SERVER_STOPPED_R-', None)
 
-# unused
-def restart_server():
-    global process
-    if process is not None:
-        stop_server()
-        start_server_delayed()
-    else:
-        sg.popup('Server is not running')
-
-def start_server_restart():
-    window.Element('output').Update('')
-    thread = threading.Thread(target=run_bat_file_restart, daemon=True)
-    thread.start()
-
-
-def run_command(values):
-    command = values['input']
-    process.stdin.write(command + "\n")
+def run_command(server_command):
+    #command = values['input']
+    process.stdin.write(server_command + "\n")
     process.stdin.flush()
+
+def update_permissions_thread():
+    time.sleep(1)
+    row_number = values['player_list'][0]
+    xuid = player_list[row_number][1]
+    # Update the player level
+    level = "Member"  #TODO make this be the default permission level for server.properties
+    with open(permissions_dir) as f:
+        permissions = json.load(f)
+    for permission in permissions:
+        if permission['xuid'] == xuid:
+            level = permission['permission'].capitalize()
+            break
+    player_list[row_number][2] = level
+    window['player_list'].update(values=player_list)  # update player list with list of dictionaries
+
+def update_permissions():
+    t = threading.Thread(target=update_permissions_thread)
+    t.start()
 
 def op_player():
-    selected = values['player_list']
-    if selected:
-        player_name = selected[0]
-        command = f"op {player_name}"
-        print(command)
-        process.stdin.write(command + "\n")
-        process.stdin.flush()
+    if values['player_list']:
+        row_number = values['player_list'][0]
+        player_name = player_list[row_number][0]
+        if player_name:
+            command = f'op "{player_name}"'
+            #print(command)
+            process.stdin.write(command + "\n")
+            process.stdin.flush()
+            update_permissions()
 
 def deop_player():
-    selected = values['player_list']
-    if selected:
-        player_name = selected[0]
-        command = f"deop {player_name}"
-        print(command)
-        process.stdin.write(command + "\n")
-        process.stdin.flush()
+    if values['player_list']:
+        row_number = values['player_list'][0]
+        player_name = player_list[row_number][0]
+        if player_name:
+            command = f'deop "{player_name}"'
+            #print(command)
+            process.stdin.write(command + "\n")
+            process.stdin.flush()
+            update_permissions()
 
 def kick_player():
-    selected = values['player_list']
-    if selected:
-        player_name = selected[0]
-        command = f"kick {player_name}"
-        print(command)
-        process.stdin.write(command + "\n")
-        process.stdin.flush()
-# create the GUI layout
+    if values['player_list']:
+        row_number = values['player_list'][0]
+        player_name = player_list[row_number][0]
+        if player_name:
+            command = f'kick "{player_name}"'
+            process.stdin.write(command + "\n")
+            process.stdin.flush()
+
+def auto_restart():
+    global server_status
+    global stop_event
+    while not stop_event.is_set():
+        restart_enabled = config['SERVER'].getboolean('Restartenabled')
+        if restart_enabled:
+            restart_interval = int(config['SERVER']['RestartInterval'])
+
+            for remaining_time in range(restart_interval * 60 * 60, 0, -1):
+                if stop_event.is_set():
+                    break  # exit the loop if the stop event is set
+
+                hours, remainder = divmod(remaining_time, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                countdown_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                window['-RESTART_COUNTDOWN-'].update(countdown_str)
+
+                time.sleep(1)
+
+            if server_status == 'Running':
+                restart_server()
+                player_list = []  # Remove all players
+                window['player_list'].update(values=player_list)
+                player_count = 0
+                window['-ONLINE_PLAYERS-'].update(player_count)
+                update_info()
+                break
+            else:
+                break
+        else:
+            break
+
+def update_uptime():
+    global stop_event
+    start_time = time.time()
+    while not stop_event.is_set():
+        elapsed_time = time.time() - start_time
+
+        hours, remainder = divmod(elapsed_time, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        uptime = "{:02}:{:02}:{:02}".format(int(hours), int(minutes), int(seconds))
+        window['-INFO_UPTIME-'].update(uptime)
+        time.sleep(1)
+
+def update_info():
+    window['-INFO_LEVELNAME-'].update('- - -')
+    window['-INFO_GAMEMODE-'].update('- - -')
+    window['-INFO_DIFFICULTY-'].update('- - -')
+    window['-INFO_VERSION-'].update('- - -')
+    window['-INFO_ADDRESS-'].update('- - -')
+    window['-INFO_PORT-'].update('- - -')
+    window['-INFO_UPTIME-'].update('—:—:—')
+    window['-RESTART_COUNTDOWN-'].update('—:—:—')
+
+sg.theme(app_theme)
 
 
+#DefaultNoMoreNagging = Light
+#DarkGray13 = Dark
+#DarkBlue3 = Gray
+#PythonPlus = Blue
+
+themes = ['Light', 'Dark', 'Gray', 'Blue']
+
+headings = ['Name', 'Xuid', 'Level']
 
 operations_column = [
-    [sg.Text("Server Status:", pad=(0,0)), sg.Text("Stopped", key="-SERVER_STATE-")],
-    [sg.Button('Start', button_color="green", size = (10,0)), 
-     sg.Button('Restart', button_color="#DBA800", size = (10,0)), 
+    [sg.Text("Server Status:", pad=(0,0)), sg.Text("Stopped", key="-SERVER_STATE-", size=(6,1)), sg.Text('Uptime:', size=(8,1), justification='right'), sg.Text('—:—:—', key='-INFO_UPTIME-', size=(15,1))],
+    [sg.Button('Start', button_color="green", size = (10,0)),
+     sg.Button('Restart', button_color="#DBA800", size = (10,0)),
      sg.Button('Stop', button_color="red", size = (10,0))],
-    [sg.Button('Index.ts', size = (16,0)), sg.Button('Server.properties', size = (16,0))], 
-    [sg.Button('BDSX Folder', size = (16,0)), sg.Button(' ', size = (16,0))], 
+    [sg.Button('Index.ts', size = (16,0)), sg.Button('Server.properties', size = (16,0))],
+    [sg.Button('BDSX Folder', size = (16,0)), sg.Button(' ', size = (16,0))],
     [sg.Text('—'*22, pad = (0,0), justification = "center")],
-    
-    [sg.Text("Auto Restart System:"), sg.Checkbox("Enabled", enable_events=True, key="-RESTART_ENABLED-")],
-    [sg.Text("Next Restart:"), sg.Text("- -", key="-COUNTDOWN-")],
+
+    [sg.Text("Auto Restart System:"), sg.Checkbox("Enabled", default=restart_enabled, enable_events=True, key="-RESTART_ENABLED-")],
+    [sg.Text("Next Restart:"), sg.Text("—:—:—", key="-RESTART_COUNTDOWN-")],
     [sg.Text("Restart Interval:")],
-    [sg.Radio("1 hr", "RADIO1", key="-1", enable_events=True), 
-     sg.Radio("2 hrs", "RADIO1", key="-2", enable_events=True), 
-     sg.Radio("6 hrs", "RADIO1", default=True, key="-6", enable_events=True), 
+    [sg.Radio("1 hr", "RADIO1", key="-1", enable_events=True),
+     sg.Radio("2 hrs", "RADIO1", key="-2", enable_events=True),
+     sg.Radio("6 hrs", "RADIO1", default=True, key="-6", enable_events=True),
      sg.Radio("12 hrs", "RADIO1", key="-12", enable_events=True)],
-    
+
+
     [sg.Text('—'*22, pad = (0,0), justification = "center")],
     [sg.Text("Online Players:"), sg.Text("0", key=("-ONLINE_PLAYERS-"))],
-    [sg.Listbox(values=player_list, size=(50, 8), key='player_list')],
-    [sg.Button('OP', size = (10,0)), 
-     sg.Button('DEOP', size = (10,0)), 
+    [sg.Table(headings=headings, values=player_list, enable_events=True, justification='center', auto_size_columns=False, def_col_width=10, num_rows=7, key='player_list')],
+    [sg.Button('OP', size = (10,0)),
+     sg.Button('DEOP', size = (10,0)),
      sg.Button('Kick', size = (10,0))],
     [sg.Button("Test", key=("-TEST-"), visible=False)],
+
+    [sg.Text('—'*22, pad = (0,0), justification = "center")],
+    [sg.Combo(values=themes, readonly=True, size=(16,1), key='-CHANGE_THEME-', default_value = app_theme_format, tooltip='Change the theme of the app, requires restart', enable_events = True),
+     sg.Text('App Theme', size=(13,1), tooltip='Change the theme of the app, requires restart'),
+     sg.Button('⟳', size=(2,1), key='-RESTART_APP-', tooltip='Restart BDSX Manager')],
+    [sg.Checkbox("Hide Telemetry Message", default=hide_telemetry_msg, enable_events=True, key="-HIDE_TELEMETRY_MSG-", tooltip='Hides the telemetry message without having to modify server.properties')],
+    [sg.Text('Version: '+version, font=('Helvetica', 8), size=(50,1), pad=(5,14), justification='right')]
     ]
-    
+
 output_column = [
-    [sg.Text(' Console Output:')],
+    [sg.Text('Console Output:')],
     [sg.Multiline(size=(120, 25), key='output', autoscroll=True, disabled=True)],
-    [sg.InputText(size=(114,1), key='input'), sg.Button('Run', size=(5,1))],
+    [sg.InputText(size=(102,1), key='input', pad=(6,5)), sg.Button('Run', size=(8,1)), sg.Button('Clear', size=(5,1), key='-CLEAR-')],
+    [sg.Text('Server Information', font=('Helvetica', 14), justification='Center', pad=(0,6), size=(25,0)), ],
+    [sg.Text('Level Name:', size=(10,1), justification='left'), sg.Text('- - -', key='-INFO_LEVELNAME-', size=(15,1)), sg.Text('Server Version:', size=(12,1), justification='left'), sg.Text('- - -', key='-INFO_VERSION-', size=(15,1))],
+    [sg.Text('Gamemode:', size=(10,1), justification='left'), sg.Text('- - -', key='-INFO_GAMEMODE-', size=(15,1)), sg.Text('Address:', size=(12,1), justification='left'), sg.Text('- - -', key='-INFO_ADDRESS-', size=(15,1))],
+    [sg.Text('Difficulty:', size=(10,1), justification='left'), sg.Text('- - -', key='-INFO_DIFFICULTY-', size=(15,1)), sg.Text('Port:', size=(12,1), justification='left'), sg.Text('- - -', key='-INFO_PORT-', size=(15,1))],
     ]
-    
+
 
 layout = [
-    [sg.Column(output_column, justification = "left", vertical_alignment = ("top")), 
+    [sg.Column(output_column, justification = "left", vertical_alignment = ("top")),
      sg.Column(operations_column, justification = "left", vertical_alignment = ("top"))],
     ]
 
 
-#sg.theme('DefaultNoMoreNagging')
+window = sg.Window('BDSX Manager', layout, size = (1200,610), finalize=True, enable_close_attempted_event=True)
 
-window = sg.Window('BDSX Manager', layout, size = (1200,600), finalize=True)
-
-restart_interval = config['SERVER'].get('RestartInterval', '6 hr')
+restart_interval = config['SERVER']['RestartInterval']
 if restart_interval == '1':
     window['-1'].update(value=True)
 elif restart_interval == '2':
@@ -354,61 +427,64 @@ elif restart_interval == '6':
 elif restart_interval == '12':
     window['-12'].update(value=True)
 
-restart_enabled = config['SERVER'].getboolean('Restartenabled')
-window['-RESTART_ENABLED-'].update(value=restart_enabled)
 
 
 while True:
     # read the window's events
     event, values = window.read()
     print(event)
-    
-    restart_enabled = int(config['SERVER'].getboolean('Restartenabled'))
-    if restart_enabled is True and process is not None:
-        time.sleep(restart_interval)
-        print('Restart')
-  
-    # if the 'Run .bat file' button is clicked
+
     if event == 'Start':
     # Check if the process is already running
         if process is not None:
             sg.popup('Server is already running')
         else:
-            # run the .bat file with the command as an argument
             stop_flag = False
             start_server()
-            if restart_enabled == 1:
-                start_server_restart()
+            stop_event = threading.Event()
+
 
     if event == 'Restart':
         if process is None:
             sg.popup('Server is not running')
         else:
-            stop_server()
-            stop_restart_loop()        
-            start_server_delayed()
-            if restart_enabled == 1:
-                #stop_flag = False
-                start_server_restart()
+            restart_thread = threading.Thread(target=restart_server, daemon=True)
+            restart_thread.start()
+
             player_list = []  # remove all players
             window['player_list'].update(values=player_list)
             player_count = 0
             window['-ONLINE_PLAYERS-'].update(player_count)
+            stop_event.set()
+            update_info()
+
+    if event == '-SERVER_RESTARTABLE-':
+        stop_flag = False
+        start_server()
+        stop_event = threading.Event()
 
     if event == 'Stop':
         if process is None:
             sg.popup('Server is not running')
         else:
             stop_server()
-            stop_restart_loop()
             player_list = []  # remove all players
             window['player_list'].update(values=player_list)
             player_count = 0
             window['-ONLINE_PLAYERS-'].update(player_count)
-    
+            stop_event.set()
+            update_info()
+
     if event == 'Run':
-        print("run", values['input'])
-        run_command(values)
+        server_command = values['input'].strip()
+        if server_command:
+            if process is None:
+                sg.popup('Server is not running')
+            else:
+                run_command(server_command)
+
+    if event == '-CLEAR-':
+        window['input'].update('')
 
     if event == 'OP':
         op_player()
@@ -432,12 +508,24 @@ while True:
         subprocess.Popen(f'explorer "{current_folder}"')  # Open the folder using the default file explorer
 
     if event == "-TEST-":
-        print(bat_file)
-        #print(bat_file2)
-        #stop_flag = False
-            
+        print(server_dir)
+        
+    if event == '-RESTART_APP-':
+        if process is not None:
+            if sg.popup_ok_cancel('Are you sure you want to stop the server', title='Confirmation') == 'OK':
+                stop_server()
+                force_close_thread = threading.Thread(target=stop_server_force, args=('Restart',), daemon=True)
+                force_close_thread.start()
+        else:
+            window.close()
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+    if event == '-SERVER_STOPPED_R-':
+        window.close()
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
     if event == '-1' or event == '-2' or event == '-6' or event == '-12':
-        print("Test")
         config['SERVER']['RestartInterval'] = event[1:]
         with open('config.ini', 'w') as configfile:
             config.write(configfile)
@@ -452,15 +540,50 @@ while True:
         with open('config.ini', 'w') as configfile:
             config.write(configfile)
 
+    if event == '-HIDE_TELEMETRY_MSG-':
+        if values['-HIDE_TELEMETRY_MSG-']:
+            config['SERVER']['HideTelemetryMsg'] = '1'
+        else:
+            config['SERVER']['HideTelemetryMsg'] = '0'
+        with open('config.ini', 'w') as configfile:
+            config.write(configfile)
 
-    # if the 'Exit' button is clicked or the window is closed
-    if event in (None,):
+    if event == '-CHANGE_THEME-':
+        theme = values['-CHANGE_THEME-']
+        if theme == 'Light':
+            theme = 'DefaultNoMoreNagging'
+        elif theme == 'Dark':
+            theme = 'DarkGray13'
+        elif theme == 'Gray':
+            theme = 'DarkBlue3'
+        elif theme == 'Blue':
+            theme = 'PythonPlus'
+
+        if theme:
+            config['SERVER']['Theme'] = theme
+            with open('config.ini', 'w') as configfile:
+                config.write(configfile)
+
+    # old closing method, doesnt work with bdsx for some reason, bedrock_server starts using more and more ram till ur pc crashes
+    #if event in (None,):
+    #    if process is not None:
+    #        stop_server()
+    #        stop_event.set()
+    #        stop_flag = True
+    #
+    #        break
+    #    else:
+    #        break
+
+    if event == sg.WIN_X_EVENT:
         if process is not None:
-            stop_server()
-            break
+            if sg.popup_ok_cancel('Are you sure you want to stop the server', title='Confirmation') == 'OK':
+                stop_server()
+                force_close_thread = threading.Thread(target=stop_server_force, args=('Stop',), daemon=True)
+                force_close_thread.start()
         else:
             break
+    if event == '-SERVER_STOPPED-':
+        break
 
-# close the window
 window.close()
-
