@@ -4,12 +4,12 @@ BDSX-Manager is a Python-based GUI wrapper for managing a BDSX Server. It has ba
 
 # Installation
 
-To use this simply download the BDSX-Manager.exe and place it into the main bdsx directory, it will create a config.ini file to save settings. You do not need to download config.ini. If you have python and want to use the .py or .pyw file you will need to install the requred packages.
+To use this simply download the BDSX-Manager.exe from the latest release and place it into the main bdsx directory, it will create a config.ini file to save settings. You do not need to download config.ini. If you have python and want to use the .py or .pyw file you will need to install the requred packages.
 
 Bdsx Github: https://github.com/bdsx/bdsx
 
 # Other
 
-In the future I want to add other feature such as auto backup and chat management feature. If you have any suggestions or bugs/problems please open an issue.
+In the future I want to add other features such as auto backup and chat management feature. If you have any suggestions or bugs/problems please open an issue.
 
 ![BDSX-Manager Screenshot](https://user-images.githubusercontent.com/109999434/225047926-1b424e36-caee-415e-9e7c-7866e9320a07.png)
